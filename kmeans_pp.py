@@ -28,7 +28,7 @@ def parse_args(argv):
     Throws error in case it's incorrect
     """
 
-    if(len(argv) != 5 or len(argv) != 6):
+    if len(argv) not in (5, 6):
         print_error(ERROR_OCCURRED)
     
     # K
@@ -85,7 +85,7 @@ def load_and_merge(file1: str, file2: str):
     """
 
     try:
-        df1 = pd.read_cvs(file1, header=None)
+        df1 = pd.read_csv(file1, header=None)
         df2 = pd.read_csv(file2, header=None)
     except Exception:
         print_error(ERROR_OCCURRED)  
@@ -93,8 +93,8 @@ def load_and_merge(file1: str, file2: str):
 
 
     try: 
-        df1.rename(column = {0, 'key'}, inplace = True)
-        df2.rename(column = {0, 'key'}, inplace = True)
+        df1.rename(columns = {0: 'key'}, inplace = True)
+        df2.rename(columns = {0: 'key'}, inplace = True)
 
         merged = pd.merge(df1, df2, on = 'key', how="inner")
         merged = merged.sort_values('key', ascending=True)
@@ -106,7 +106,7 @@ def load_and_merge(file1: str, file2: str):
         keys = merged["key"].to_numpy(dtype=float)
         data_points = merged.drop(columns=["key"]).to_numpy(dtype=float)
     except Exception:
-        print_error(ERROR_OCCURRED)    
+        print_error(ERROR_OCCURRED)   
 
     return keys, data_points
 
@@ -177,6 +177,7 @@ def main():
     
     print(",".join(str(keys[i]) for i in chose_idxs))
 
+    
     try:
         final_centroids = mykmeanssp.fit(
             K, max_iter, eps,
@@ -186,11 +187,19 @@ def main():
     except Exception:
         print_error(ERROR_OCCURRED)
 
+        
+
+    
+        
+
    
 
     # 6) print final centroids (each row with 4 decimals)
     for row in final_centroids:
         print(format_row(row))
+
+        
+
 
     
 

@@ -3,30 +3,24 @@
 
 #include <stdlib.h>
 #include <math.h>
-#define _GNU_SOURCE 
 #include <stdio.h>
-
-#define ERROR_NUM_CLUSTERS "Incorrect number of clusters!"
-#define ERROR_MAX_ITER "Incorrect maximum iteration!"
-#define ERROR_OCCURED "An Error Has Occurred"
-#define MAX_ITER_DEFAULT 400  /* Default maximum iterations */ 
-#define EPS 0.001
 
 /*declaration of structs*/
 struct vector;
 struct cord;
 
 /*declaration of functions*/
-int isInteger(char *str);
 double compute_distance(const struct vector *v1, const struct vector *v2, int dim); 
-int find_dim(const struct vector *vec);
-struct vector *initialize_centroids(const struct vector *head_vec, int K, int dim);
 int find_closest_centroid(const struct vector *centroids, const struct vector *vectorX, int K, int dim);
 struct vector *add_coordinates_from_other_vector(struct vector *v1, struct vector *v2, int dim);
 struct vector *initialize_sum_vectors(int K, int dim);
 void divide_vector_by_scalar(struct vector *v, int scalar);
 void free_vector_list(struct vector *head_vec); 
 void zero_out_vector(struct vector *v);
+void free_cords_list(struct cord *head_c);
+
+
+
 
 /*implementations of structs*/
 struct cord
@@ -170,74 +164,6 @@ struct vector *initialize_sum_vectors(int K, int dim) {
 }
 
 
-/*
- * Creates a deep copy of the first K vectors from the input list to serve as initial centroids.
- * Returns the head of the new centroid list, or NULL on failure.
- */
-struct vector *initialize_centroids(const struct vector *head_vec, int K, int dim) {
-    struct vector *head_centroid=NULL, *curr_centroid=NULL, *new_centroid;
-    const struct vector *source_v = head_vec;
-    struct cord *head_cord, *curr_cord;
-    const struct cord *source_c;
-    int i,j;
-    
-    for(i=0; i<K && source_v != NULL;i++) {
-        new_centroid = malloc(sizeof(struct vector));
-        if(new_centroid == NULL) {
-            free_vector_list(head_centroid);
-            return NULL;
-        }
-        new_centroid->next = NULL;
-        source_c = source_v->cords;
-        head_cord = malloc(sizeof(struct cord));
-        if(head_cord == NULL) {
-            free(new_centroid);
-            free_vector_list(head_centroid);
-            return NULL;
-        }
-        curr_cord = head_cord;
-
-        for(j=0; j<dim; j++) {
-            curr_cord->value = source_c->value;
-            source_c = source_c->next;
-            
-            if(j <dim -1) {
-                curr_cord->next = malloc(sizeof(struct cord));
-                if(curr_cord->next == NULL) {
-                    new_centroid->cords = head_cord;
-                    
-                    if(head_centroid == NULL) {
-                        head_centroid = new_centroid;
-                    } else {
-                        curr_centroid->next = new_centroid;
-                    }
-
-                    free_vector_list(head_centroid);
-                    return NULL;
-                }
-                curr_cord = curr_cord->next;
-
-            } else {
-                curr_cord->next = NULL;
-            }
-        }
-
-           new_centroid->cords = head_cord;
-           
-           if(head_centroid == NULL) {
-            head_centroid = new_centroid;
-            curr_centroid = head_centroid;
-           } else {
-            curr_centroid->next = new_centroid;
-            curr_centroid = curr_centroid->next;
-           }
-
-        source_v = source_v->next;   
-    }
-    return head_centroid;
-}
-
-
 
 /*
  * Calculates the Euclidean distance between two vectors (points). 
@@ -272,46 +198,6 @@ double compute_distance(const struct vector *v1, const struct vector *v2, int di
 }
 
 
-/*
- * Determines the dimensionality (number of coordinates) of a vector 
- * by counting the length of its coordinate linked list.
- */
-int find_dim(const struct vector *vec)
-{
-    int dim = 0;
-    const struct cord *c;
-
-    if (vec == NULL) {
-        return 0;
-    }
-
-    c = vec->cords;
-    while (c != NULL) {
-        dim++;
-        c = c->next;
-    }
-
-    return dim;
-}
-
-/*
- * Validates if a string represents a positive integer.
- * Returns 1 if valid, 0 otherwise.
- */
-int isInteger(char *str) {
-
-    if (str == NULL || *str == '\0') {
-        return 0; 
-    }
-    
-    while (*str) {
-        if (*str < '0' || *str > '9') {
-            return 0; 
-        }
-        str++;
-    }
-    return 1; 
-}
 
 /*
  * Iterates through all centroids to find the one closest to vectorX.
@@ -334,4 +220,250 @@ int find_closest_centroid(const struct vector *centroids, const struct vector *v
     }
     return min_index;
 }
+
+
+
+/* Frees all memory allocated for the coordinates */
+ void free_cords_list(struct cord *head_c) {
+    struct cord *curr = head_c;
+    while (curr != NULL) {
+        struct cord *temp = curr;
+        curr = curr->next;
+        free(temp);
+    }
+}
+
+
+/*
+ * Converts a Python list of lists (e.g., [[1.0, 2.0], ...]) into a C linked list.
+ * * Args:
+ * py_list: Pointer to the Python list object.
+ * N: Pointer to store the number of vectors found.
+ * dim: Pointer to store the dimension of the vectors.
+ * * Returns:
+ * Pointer to the head of the new C linked list.
+ */
+struct vector* python_to_c_list(PyObject *py_list, int *N, int *dim) {
+
+    struct vector *head = NULL, *curr = NULL;
+    PyObject *item;
+    Py_ssize_t d;
+    Py_ssize_t n = PyList_Size(py_list);
+    Py_ssize_t i, j;
+    *N = (int)n;
+
+    for (i = 0; i < n; i++) {
+        item = PyList_GetItem(py_list, i);
+        d = PyList_Size(item);
+        *dim = (int)d;
+
+        /* Malloc memory for a vector */
+        struct vector *new_vec = malloc(sizeof(struct vector));
+        
+        /* Protection from MALLOC NULL */
+        if (new_vec == NULL) {
+            free_vector_list(head);      /* Clean everything we collected before */
+            PyErr_NoMemory();            /* We tell Python there is a mistake: MemoryError */
+            return NULL;
+        }
+        
+        new_vec->next = NULL;
+        new_vec->cords = NULL; /* We initialiize to be null */
+
+        struct cord *head_c = NULL, *curr_c = NULL;
+
+        /* Inter loop for coordinates */
+        for (j = 0; j < d; j++) {
+            PyObject *val = PyList_GetItem(item, j);
+            
+            struct cord *new_c = malloc(sizeof(struct cord));
+            
+            /* protection from MALLOC NULL (inside the loop) */
+            if (new_c == NULL) {
+                free_cords_list(head_c); /* Clean the cooardinate of current vector */
+                free(new_vec);           /* Clean the current vector */
+                free_vector_list(head);  /* Clean all the list */
+                PyErr_NoMemory();        /* Send the error to Python */
+                return NULL;
+            }
+
+            new_c->value = PyFloat_AsDouble(val);
+            new_c->next = NULL;
+            
+            if (head_c == NULL) { head_c = new_c; curr_c = new_c; }
+            else { curr_c->next = new_c; curr_c = curr_c->next; }
+        }
+        new_vec->cords = head_c;
+
+        if (head == NULL) { head = new_vec; curr = head; }
+        else { curr->next = new_vec; curr = curr->next; }
+    }
+    return head;
+}
+
+
+static PyObject* fit(PyObject *self, PyObject *args) {
+    struct vector *curr_sum;
+    struct vector *curr_cent;
+    int K, iter;
+    double epsilon;
+    PyObject *data_list, *centroid_list_py;
+    int N, dim;
+
+    /*  Parse arguments from Python */
+    if(!PyArg_ParseTuple(args, "iidOO", &K, &iter, &epsilon, &data_list, &centroid_list_py)) {
+        return NULL;
+    }
+
+    /*  Convert Python lists to C linked lists */
+    struct vector *head_data = python_to_c_list(data_list, &N, &dim);
+    if (!head_data) return NULL;
+
+    struct vector *head_centroids = python_to_c_list(centroid_list_py, &K, &dim);
+    if (!head_centroids) {
+        free_vector_list(head_data);
+        return NULL;
+    }
+
+    /* Initialize helping structures (accumulators) */
+    struct vector *sum_head = initialize_sum_vectors(K, dim);
+    int *counts = calloc(K, sizeof(int));
+
+    int iteration = 0;
+    int converged = 0;
+
+    /* MAIN K-MEANS LOOP */
+    while (iteration < iter && !converged) {
+        
+        /* Reset accumulators for the new iteration */
+        curr_sum = sum_head;
+        while(curr_sum != NULL) {
+            zero_out_vector(curr_sum);
+            curr_sum = curr_sum->next;
+        }
+        for(int i = 0; i < K; i++) counts[i] = 0;
+
+        /* Assignment Step: assign each point to the closest centroid */
+        struct vector *curr_vec = head_data;
+        while(curr_vec != NULL) {
+            int closest_idx = find_closest_centroid(head_centroids, curr_vec, K, dim);
+            counts[closest_idx]++;
+
+            /* Find the corresponding sum vector */
+            struct vector *target_sum = sum_head;
+            for(int i = 0; i < closest_idx; i++) target_sum = target_sum->next;
+
+            /* Add current point's coordinates to the cluster sum */
+            add_coordinates_from_other_vector(target_sum, curr_vec, dim);
+            
+            curr_vec = curr_vec->next;
+        }
+
+        /* Update Step: calculate new centroids */
+        converged = 1;
+        curr_cent = head_centroids;
+        curr_sum = sum_head;
+        int idx = 0;
+
+        while(curr_cent != NULL) {
+            
+            /* HANDLING EMPTY CLUSTERS */
+            if (counts[idx] == 0) {
+                /* If a cluster is empty, copy coordinates from the FIRST data point */
+                struct cord *src = head_data->cords; 
+                struct cord *dst = curr_cent->cords;
+                
+                while(src != NULL && dst != NULL) {
+                    dst->value = src->value; 
+                    src = src->next;
+                    dst = dst->next;
+                }
+                /* If we forced a centroid move, convergence is not reached */
+                converged = 0; 
+            } 
+            else {
+                /* Normal case: calculate the mean (sum / count) */
+                divide_vector_by_scalar(curr_sum, counts[idx]);
+                
+                /* Check convergence: distance between old and new position */
+                if (compute_distance(curr_cent, curr_sum, dim) >= epsilon) {
+                    converged = 0;
+                }
+
+                /* Update centroid coordinates */
+                struct cord *cent_c = curr_cent->cords;
+                struct cord *sum_c = curr_sum->cords;
+                while(cent_c != NULL) {
+                    cent_c->value = sum_c->value;
+                    cent_c = cent_c->next;
+                    sum_c = sum_c->next;
+                }
+            }
+            
+            curr_cent = curr_cent->next;
+            curr_sum = curr_sum->next;
+            idx++;
+        }
+        iteration++;
+    }
+
+    /* Convert result back to Python list */
+    PyObject *result_list = PyList_New(K);
+    curr_cent = head_centroids;
+    for (int i = 0; i < K; i++) {
+        PyObject *py_vec = PyList_New(dim);
+        struct cord *c = curr_cent->cords;
+        for (int j = 0; j < dim; j++) {
+            PyList_SetItem(py_vec, j, PyFloat_FromDouble(c->value));
+            c = c->next;
+        }
+        PyList_SetItem(result_list, i, py_vec);
+        curr_cent = curr_cent->next;
+    }
+
+    /* Memory Cleanup */
+    free_vector_list(head_data);
+    free_vector_list(head_centroids);
+    free_vector_list(sum_head);
+    free(counts);
+
+    return result_list;
+}
+
+
+/* --- MODULE REGISTRATION CODE --- */
+
+/* 1. Method definitions table: maps Python method names to C functions */
+static PyMethodDef mykmeanssp_methods[] = {
+    {
+        "fit",                   /* The name of the method as seen in Python */
+        (PyCFunction) fit,       /* The actual C function to be called */
+        METH_VARARGS,            /* Flags indicating the function accepts positional arguments */
+        "Run K-means clustering" /* Function documentation (docstring) */
+    },
+    {NULL, NULL, 0, NULL}        /* Sentinel value to mark the end of the array */
+};
+
+/* 2. Module definition structure */
+static struct PyModuleDef mykmeanssp_module = {
+    PyModuleDef_HEAD_INIT,
+    "mykmeanssp",             /* Module name (must match the name in setup.py) */
+    "C extension for K-means",/* Module documentation string */
+    -1,                       /* Size of per-interpreter state (using -1 for global state) */
+    mykmeanssp_methods        /* Reference to the method table defined above */
+};
+
+/* 3. Module initialization function: called when 'import mykmeanssp' is executed */
+PyMODINIT_FUNC PyInit_mykmeanssp(void) {
+    PyObject *m;
+    m = PyModule_Create(&mykmeanssp_module);
+    if (!m) {
+        return NULL; /* Return NULL to signal an initialization error */
+    }
+    return m;
+}
+
+
+
+    
 
