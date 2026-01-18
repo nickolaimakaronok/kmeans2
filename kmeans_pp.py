@@ -175,7 +175,7 @@ def main():
 
     chose_idxs, init_centroids = kmeans_pp_init(data_points, K)
     
-    print(",".join(str(keys[i]) for i in chose_idxs))
+    print(",".join(str(int(keys[i])) for i in chose_idxs))
 
     
     try:
@@ -193,7 +193,7 @@ def main():
         print(format_row(row))
 
         
-        
+
 
 if __name__ == "__main__":
     main()
