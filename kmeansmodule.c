@@ -264,17 +264,17 @@ struct vector* python_to_c_list(PyObject *py_list, int *N, int *dim) {
     curr = NULL;
     n = PyList_Size(py_list);
 
-    *N = (int)n;
+    *N = (int)n; /* Store number of points */
 
     for (i = 0; i < n; i++) {
-        item = PyList_GetItem(py_list, i);
+        item = PyList_GetItem(py_list, i);  /* Get the inner list (vector) */
         d = PyList_Size(item);
-        *dim = (int)d;
+        *dim = (int)d; /* Store dimension */
 
         /* Malloc memory for a vector */
         new_vec = malloc(sizeof(struct vector));
         
-        /* Protection from MALLOC NULL */
+        /* Check for memory allocation failure */
         if (new_vec == NULL) {
             free_vector_list(head);      /* Clean everything we collected before */
             PyErr_NoMemory();            /* We tell Python there is a mistake: MemoryError */
@@ -287,7 +287,7 @@ struct vector* python_to_c_list(PyObject *py_list, int *N, int *dim) {
         head_c = NULL;
         curr_c = NULL;
 
-        /* Inter loop for coordinates */
+        /* Inner loop: Extract coordinates from Python list */
         for (j = 0; j < d; j++) {
             val = PyList_GetItem(item, j);
             
@@ -303,7 +303,12 @@ struct vector* python_to_c_list(PyObject *py_list, int *N, int *dim) {
                 return NULL;
             }
 
+           /* Convert Python float to C double */
+
+
             new_c->value = PyFloat_AsDouble(val);
+
+            /* Check if conversion failed (e.g., item was not a number) */
             if (PyErr_Occurred()) {
                 free_cords_list(head_c);
                 free(new_vec);
@@ -313,6 +318,7 @@ struct vector* python_to_c_list(PyObject *py_list, int *N, int *dim) {
 
             new_c->next = NULL;
             
+            /* Append vector to the main list */
             if (head_c == NULL) { head_c = new_c; curr_c = new_c; }
             else { curr_c->next = new_c; curr_c = curr_c->next; }
         }
@@ -324,8 +330,13 @@ struct vector* python_to_c_list(PyObject *py_list, int *N, int *dim) {
     return head;
 }
 
+/*
+ * Main K-means algorithm implementation callable from Python.
+ * Expected Python args: (K, iter, epsilon, data_list, centroid_list)
+ */
 
 static PyObject* fit(PyObject *self, PyObject *args) {
+    /* Variable Declarations (ANSI C style - all at top) */
     struct vector *curr_sum;
     struct vector *curr_cent;
     struct vector *head_data;
@@ -359,6 +370,7 @@ static PyObject* fit(PyObject *self, PyObject *args) {
     head_data = python_to_c_list(data_list, &N, &dim);
     if (!head_data) return NULL;
 
+    /* Convert Python initial centroids list to C linked list */
     head_centroids = python_to_c_list(centroid_list_py, &K, &dim);
     if (!head_centroids) {
         free_vector_list(head_data);
@@ -375,6 +387,7 @@ static PyObject* fit(PyObject *self, PyObject *args) {
         return NULL;
     }
 
+    /* Initialize array to count points in each cluster */
     counts = calloc(K, sizeof(int));
 
     if (counts == NULL) {
@@ -397,6 +410,7 @@ static PyObject* fit(PyObject *self, PyObject *args) {
             zero_out_vector(curr_sum);
             curr_sum = curr_sum->next;
         }
+        /* Reset counts */
         for(i = 0; i < K; i++) counts[i] = 0;
 
         /* Assignment Step: assign each point to the closest centroid */
@@ -487,9 +501,9 @@ static PyObject* fit(PyObject *self, PyObject *args) {
 }
 
 
-/* --- MODULE REGISTRATION CODE --- */
+/* MODULE REGISTRATION CODE */
 
-/* 1. Method definitions table: maps Python method names to C functions */
+/* Method definitions table: maps Python method names to C functions */
 static PyMethodDef mykmeanssp_methods[] = {
     {
         "fit",                   /* The name of the method as seen in Python */
@@ -500,7 +514,7 @@ static PyMethodDef mykmeanssp_methods[] = {
     {NULL, NULL, 0, NULL}        /* Sentinel value to mark the end of the array */
 };
 
-/* 2. Module definition structure */
+/* Module definition structure */
 static struct PyModuleDef mykmeanssp_module = {
     PyModuleDef_HEAD_INIT,
     "mykmeanssp",             /* Module name (must match the name in setup.py) */
@@ -509,7 +523,7 @@ static struct PyModuleDef mykmeanssp_module = {
     mykmeanssp_methods        /* Reference to the method table defined above */
 };
 
-/* 3. Module initialization function: called when 'import mykmeanssp' is executed */
+/* Module initialization function: called when 'import mykmeanssp' is executed */
 PyMODINIT_FUNC PyInit_mykmeanssp(void) {
     PyObject *m;
     m = PyModule_Create(&mykmeanssp_module);
