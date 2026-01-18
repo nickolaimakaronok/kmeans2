@@ -171,7 +171,7 @@ def main():
     N = len(data_points)
 
     if K >= N:
-        print_error(ERROR_MAX_ITER)
+        print_error(ERROR_NUM_CLUSTERS)
 
     chose_idxs, init_centroids = kmeans_pp_init(data_points, K)
     
@@ -187,24 +187,13 @@ def main():
     except Exception:
         print_error(ERROR_OCCURRED)
 
-        
 
-    
-        
-
-   
-
-    # 6) print final centroids (each row with 4 decimals)
+    # print final centroids (each row with 4 decimals)
     for row in final_centroids:
         print(format_row(row))
 
         
-
-
-    
-
-
-
+        
 
 if __name__ == "__main__":
     main()

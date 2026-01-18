@@ -17,7 +17,13 @@ struct vector *initialize_sum_vectors(int K, int dim);
 void divide_vector_by_scalar(struct vector *v, int scalar);
 void free_vector_list(struct vector *head_vec); 
 void zero_out_vector(struct vector *v);
+
 void free_cords_list(struct cord *head_c);
+struct vector* python_to_c_list(PyObject *py_list, int *N, int *dim);
+static PyObject* fit(PyObject *self, PyObject *args);
+PyMODINIT_FUNC PyInit_mykmeanssp(void);
+
+
 
 
 
@@ -225,9 +231,12 @@ int find_closest_centroid(const struct vector *centroids, const struct vector *v
 
 /* Frees all memory allocated for the coordinates */
  void free_cords_list(struct cord *head_c) {
-    struct cord *curr = head_c;
+    struct cord *curr;
+    struct cord *temp;
+
+    curr = head_c;
     while (curr != NULL) {
-        struct cord *temp = curr;
+        temp = curr;
         curr = curr->next;
         free(temp);
     }
@@ -245,11 +254,16 @@ int find_closest_centroid(const struct vector *centroids, const struct vector *v
  */
 struct vector* python_to_c_list(PyObject *py_list, int *N, int *dim) {
 
-    struct vector *head = NULL, *curr = NULL;
-    PyObject *item;
-    Py_ssize_t d;
-    Py_ssize_t n = PyList_Size(py_list);
+    struct vector *head, *curr, *new_vec;
+    struct cord *head_c, *curr_c, *new_c;
+    PyObject *item, *val;
+    Py_ssize_t n, d;
     Py_ssize_t i, j;
+
+    head = NULL;
+    curr = NULL;
+    n = PyList_Size(py_list);
+
     *N = (int)n;
 
     for (i = 0; i < n; i++) {
@@ -258,7 +272,7 @@ struct vector* python_to_c_list(PyObject *py_list, int *N, int *dim) {
         *dim = (int)d;
 
         /* Malloc memory for a vector */
-        struct vector *new_vec = malloc(sizeof(struct vector));
+        new_vec = malloc(sizeof(struct vector));
         
         /* Protection from MALLOC NULL */
         if (new_vec == NULL) {
@@ -270,16 +284,18 @@ struct vector* python_to_c_list(PyObject *py_list, int *N, int *dim) {
         new_vec->next = NULL;
         new_vec->cords = NULL; /* We initialiize to be null */
 
-        struct cord *head_c = NULL, *curr_c = NULL;
+        head_c = NULL;
+        curr_c = NULL;
 
         /* Inter loop for coordinates */
         for (j = 0; j < d; j++) {
-            PyObject *val = PyList_GetItem(item, j);
+            val = PyList_GetItem(item, j);
             
-            struct cord *new_c = malloc(sizeof(struct cord));
+            new_c = malloc(sizeof(struct cord));
             
             /* protection from MALLOC NULL (inside the loop) */
             if (new_c == NULL) {
+                free(new_c);   
                 free_cords_list(head_c); /* Clean the cooardinate of current vector */
                 free(new_vec);           /* Clean the current vector */
                 free_vector_list(head);  /* Clean all the list */
@@ -288,6 +304,13 @@ struct vector* python_to_c_list(PyObject *py_list, int *N, int *dim) {
             }
 
             new_c->value = PyFloat_AsDouble(val);
+            if (PyErr_Occurred()) {
+                free_cords_list(head_c);
+                free(new_vec);
+                free_vector_list(head);
+                return NULL;
+            }
+
             new_c->next = NULL;
             
             if (head_c == NULL) { head_c = new_c; curr_c = new_c; }
@@ -305,10 +328,27 @@ struct vector* python_to_c_list(PyObject *py_list, int *N, int *dim) {
 static PyObject* fit(PyObject *self, PyObject *args) {
     struct vector *curr_sum;
     struct vector *curr_cent;
+    struct vector *head_data;
+    struct vector *head_centroids;
+    struct vector *sum_head;
+    struct vector *curr_vec;
+    struct vector *target_sum;
+    struct cord *src;
+    struct cord *dst;
+    struct cord *cent_c;
+    struct cord *sum_c;
+    struct cord *c;
     int K, iter;
     double epsilon;
+    int closest_idx;
     PyObject *data_list, *centroid_list_py;
+    PyObject *result_list;
+    PyObject *py_vec;
+    int *counts;
     int N, dim;
+    int i, j;
+    int idx;
+    int iteration, converged;
 
     /*  Parse arguments from Python */
     if(!PyArg_ParseTuple(args, "iidOO", &K, &iter, &epsilon, &data_list, &centroid_list_py)) {
@@ -316,21 +356,37 @@ static PyObject* fit(PyObject *self, PyObject *args) {
     }
 
     /*  Convert Python lists to C linked lists */
-    struct vector *head_data = python_to_c_list(data_list, &N, &dim);
+    head_data = python_to_c_list(data_list, &N, &dim);
     if (!head_data) return NULL;
 
-    struct vector *head_centroids = python_to_c_list(centroid_list_py, &K, &dim);
+    head_centroids = python_to_c_list(centroid_list_py, &K, &dim);
     if (!head_centroids) {
         free_vector_list(head_data);
         return NULL;
     }
 
     /* Initialize helping structures (accumulators) */
-    struct vector *sum_head = initialize_sum_vectors(K, dim);
-    int *counts = calloc(K, sizeof(int));
+    sum_head = initialize_sum_vectors(K, dim);
 
-    int iteration = 0;
-    int converged = 0;
+    if (sum_head == NULL) {
+        free_vector_list(head_data);
+        free_vector_list(head_centroids);
+        PyErr_NoMemory();
+        return NULL;
+    }
+
+    counts = calloc(K, sizeof(int));
+
+    if (counts == NULL) {
+        free_vector_list(head_data);
+        free_vector_list(head_centroids);
+        free_vector_list(sum_head);
+        PyErr_NoMemory();
+        return NULL;
+    }
+
+    iteration = 0;
+    converged = 0;
 
     /* MAIN K-MEANS LOOP */
     while (iteration < iter && !converged) {
@@ -341,17 +397,17 @@ static PyObject* fit(PyObject *self, PyObject *args) {
             zero_out_vector(curr_sum);
             curr_sum = curr_sum->next;
         }
-        for(int i = 0; i < K; i++) counts[i] = 0;
+        for(i = 0; i < K; i++) counts[i] = 0;
 
         /* Assignment Step: assign each point to the closest centroid */
-        struct vector *curr_vec = head_data;
+        curr_vec = head_data;
         while(curr_vec != NULL) {
-            int closest_idx = find_closest_centroid(head_centroids, curr_vec, K, dim);
+            closest_idx = find_closest_centroid(head_centroids, curr_vec, K, dim);
             counts[closest_idx]++;
 
             /* Find the corresponding sum vector */
-            struct vector *target_sum = sum_head;
-            for(int i = 0; i < closest_idx; i++) target_sum = target_sum->next;
+            target_sum = sum_head;
+            for(i = 0; i < closest_idx; i++) target_sum = target_sum->next;
 
             /* Add current point's coordinates to the cluster sum */
             add_coordinates_from_other_vector(target_sum, curr_vec, dim);
@@ -363,15 +419,15 @@ static PyObject* fit(PyObject *self, PyObject *args) {
         converged = 1;
         curr_cent = head_centroids;
         curr_sum = sum_head;
-        int idx = 0;
+        idx = 0;
 
         while(curr_cent != NULL) {
             
             /* HANDLING EMPTY CLUSTERS */
             if (counts[idx] == 0) {
                 /* If a cluster is empty, copy coordinates from the FIRST data point */
-                struct cord *src = head_data->cords; 
-                struct cord *dst = curr_cent->cords;
+                src = head_data->cords; 
+                dst = curr_cent->cords;
                 
                 while(src != NULL && dst != NULL) {
                     dst->value = src->value; 
@@ -391,8 +447,8 @@ static PyObject* fit(PyObject *self, PyObject *args) {
                 }
 
                 /* Update centroid coordinates */
-                struct cord *cent_c = curr_cent->cords;
-                struct cord *sum_c = curr_sum->cords;
+                cent_c = curr_cent->cords;
+                sum_c = curr_sum->cords;
                 while(cent_c != NULL) {
                     cent_c->value = sum_c->value;
                     cent_c = cent_c->next;
@@ -408,12 +464,12 @@ static PyObject* fit(PyObject *self, PyObject *args) {
     }
 
     /* Convert result back to Python list */
-    PyObject *result_list = PyList_New(K);
+    result_list = PyList_New(K);
     curr_cent = head_centroids;
-    for (int i = 0; i < K; i++) {
-        PyObject *py_vec = PyList_New(dim);
-        struct cord *c = curr_cent->cords;
-        for (int j = 0; j < dim; j++) {
+    for (i = 0; i < K; i++) {
+        py_vec = PyList_New(dim);
+        c = curr_cent->cords;
+        for (j = 0; j < dim; j++) {
             PyList_SetItem(py_vec, j, PyFloat_FromDouble(c->value));
             c = c->next;
         }
